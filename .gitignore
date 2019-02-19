@@ -1,0 +1,13 @@
+bin/
+test*/
+test*.*
+
+# Make
+makefile
+
+# Visual Studio
+.vs/
+*.sln
+*.vcxproj
+*.filters
+*.user
