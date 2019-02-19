@@ -2,6 +2,7 @@
 
 #include <cppreact/attribute.hpp>
 
+#include <ostream>
 #include <utility>
 #include <vector>
 
@@ -13,17 +14,19 @@ namespace cppreact::details
 	{
 	public:
 		element_base(const element_base& element)
-			: attributes_(element.attributes_), body_(element.body_), body_str_(element.body_str_), is_closing_tag_(element.is_closing_tag_)
+			: name_(element.name_), attributes_(element.attributes_), body_(element.body_), body_str_(element.body_str_), is_closing_tag_(element.is_closing_tag_)
 		{}
 		element_base(element_base&& element) noexcept
-			: attributes_(std::move(element.attributes_)), body_(std::move(element.body_)), body_str_(std::move(element.body_str_)), is_closing_tag_(element.is_closing_tag_)
+			: name_(std::move(element.name_)), attributes_(std::move(element.attributes_)), body_(std::move(element.body_)), body_str_(std::move(element.body_str_)), is_closing_tag_(element.is_closing_tag_)
 		{}
 		virtual ~element_base() = default;
 
 	protected:
-		element_base() noexcept = default;
-		element_base(const std::string& str)
-			: body_str_(str)
+		element_base(const std::string& name)
+			: name_(name)
+		{}
+		element_base(const std::string& name, const std::string& str)
+			: name_(name), body_str_(str)
 		{}
 		
 	public:
@@ -67,12 +70,29 @@ namespace cppreact::details
 		}
 
 	public:
+		std::string name() const
+		{
+			return name_;
+		}
+		const std::vector<attribute>& attributes() const noexcept
+		{
+			return attributes_;
+		}
+		const std::vector<element_base>& body() const noexcept
+		{
+			return body_;
+		}
+		std::string body_str() const noexcept
+		{
+			return body_str_;
+		}
 		bool is_closing_tag() const noexcept
 		{
 			return is_closing_tag_;
 		}
 		
 	private:
+		std::string name_;
 		std::vector<attribute> attributes_;
 		std::vector<element_base> body_;
 		std::string body_str_;
@@ -95,7 +115,6 @@ namespace cppreact::details
 		virtual ~element() override = default;
 
 	protected:
-		element() noexcept = default;
 		using element_base::element_base;
 
 	public:
@@ -105,7 +124,9 @@ namespace cppreact::details
 	class dummy_element : public element<attribute_data<>>
 	{
 	public:
-		dummy_element() noexcept = default;
+		dummy_element()
+			: element("")
+		{}
 		dummy_element(const dummy_element&) = delete;
 		virtual ~dummy_element() override = default;
 
@@ -117,7 +138,7 @@ namespace cppreact::details
 	{
 	public:
 		string_element(const std::string& str)
-			: element(str)
+			: element("", str)
 		{}
 		string_element(const string_element&) = delete;
 		virtual ~string_element() override = default;
@@ -164,6 +185,37 @@ namespace cppreact::details
 			return result;
 		}
 	}
+
+	std::ostream& operator<<(std::ostream& stream, const element_base& element)
+	{
+		if (!element.body_str().size())
+		{
+			stream << '<' << element.name();
+
+			if (element.attributes().size())
+			{
+				for (const auto& attr : element.attributes())
+				{
+					stream << ' ' << attr.name() << "=\"" << attr.value() << '"';
+				}
+			}
+
+			stream << '>';
+
+			for (const auto& body : element.body())
+			{
+				stream << body;
+			}
+
+			stream << "</" << element.name() << '>';
+		}
+		else
+		{
+			stream << element.body_str();
+		}
+
+		return stream;
+	}
 }
 
 namespace cppreact
@@ -184,7 +236,9 @@ namespace cppreact::details
 	>>
 	{
 	public:
-		a_element() noexcept = default;
+		a_element()
+			: element("a")
+		{}
 		a_element(const a_element&) = delete;
 		virtual ~a_element() override = default;
 
