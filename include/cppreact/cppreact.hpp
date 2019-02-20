@@ -17,15 +17,36 @@ namespace cppreact::details
 		explicit cppreact(std::shared_ptr<element>&& element)
 			: element_(std::move(element))
 		{}
-		cppreact(const cppreact&) = delete;
+		cppreact(const cppreact& element) noexcept
+			: element_(element.element_)
+		{}
+		cppreact(cppreact&& element) noexcept
+			: element_(std::move(element.element_))
+		{}
 		~cppreact()
 		{
-			root_element_manager::erase(element_);
+			if (element_.use_count() == 2)
+			{
+				root_element_manager::erase(element_);
+			}
 		}
 
 	public:
-		cppreact& operator=(const cppreact&) = delete;
+		cppreact& operator=(const cppreact& element) noexcept
+		{
+			element_ = element.element_;
+			return *this;
+		}
+		cppreact& operator=(cppreact&& element) noexcept
+		{
+			element_ = std::move(element.element_);
+			return *this;
+		}
 		const element& operator*() const noexcept
+		{
+			return *element_;
+		}
+		operator element() const
 		{
 			return *element_;
 		}
@@ -35,4 +56,4 @@ namespace cppreact::details
 	};
 }
 
-#define cppreact(expr) *cppreact::details::cppreact($ expr $)
+#define cppreact(expr) (cppreact::details::cppreact($ expr $))
