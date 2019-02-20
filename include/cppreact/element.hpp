@@ -8,60 +8,37 @@
 
 namespace cppreact::details
 {
-	class dummy_element;
-
-	class element_base
+	class element
 	{
 	public:
-		element_base(const element_base& element)
-			: name_(element.name_), attributes_(element.attributes_), body_(element.body_), body_str_(element.body_str_), is_closing_tag_(element.is_closing_tag_)
-		{}
-		element_base(element_base&& element) noexcept
-			: name_(std::move(element.name_)), attributes_(std::move(element.attributes_)), body_(std::move(element.body_)), body_str_(std::move(element.body_str_)), is_closing_tag_(element.is_closing_tag_)
-		{}
-		virtual ~element_base() = default;
-
-	protected:
-		element_base(const std::string& name)
+		explicit element(const std::string& name)
 			: name_(name)
 		{}
-		element_base(const std::string& name, const std::string& str)
+		element(const std::string& name, const std::string& str)
 			: name_(name), body_str_(str)
 		{}
+		element(const element& element)
+			: name_(element.name_), attributes_(element.attributes_), body_(element.body_), body_str_(element.body_str_), is_closing_tag_(element.is_closing_tag_)
+		{}
+		element(element&& element) noexcept
+			: name_(std::move(element.name_)), attributes_(std::move(element.attributes_)), body_(std::move(element.body_)), body_str_(std::move(element.body_str_)), is_closing_tag_(element.is_closing_tag_)
+		{}
+		virtual ~element() = default;
 		
 	public:
-		element_base& operator=(const element_base&) = delete;
-		template<typename FirstAttribute_, typename... OtherAttributes_>
-		element_base operator()(FirstAttribute_&& first_attribute, OtherAttributes_&&... other_attributes) const
+		element& operator=(const element&) = delete;
+		element operator!() const
 		{
-			element_base result(*this);
-			result.add_attribute(std::forward<FirstAttribute_>(first_attribute));
-			return result(std::forward<OtherAttributes_>(other_attributes)...);
-		}
-		template<typename Attribute_>
-		element_base operator()(Attribute_&& attribute) const
-		{
-			element_base result(*this);
-			result.add_attribute(std::forward<Attribute_>(attribute));
-			return result;
-		}
-		element_base operator()() const
-		{
-			return *this;
-		}
-		element_base operator!() const
-		{
-			element_base result(*this);
+			element result(*this);
 			result.is_closing_tag_ = true;
 			return result;
 		}
 
 	public:
 		template<typename Element_>
-		element_base& add_body(Element_&& element)
+		void add_body(Element_&& element)
 		{
 			body_.push_back(std::forward<Element_>(element));
-			return body_.back();
 		}
 		template<typename Attribute_>
 		void add_attribute(Attribute_&& attribute)
@@ -78,7 +55,7 @@ namespace cppreact::details
 		{
 			return attributes_;
 		}
-		const std::vector<element_base>& body() const noexcept
+		const std::vector<element>& body() const noexcept
 		{
 			return body_;
 		}
@@ -94,38 +71,60 @@ namespace cppreact::details
 	private:
 		std::string name_;
 		std::vector<attribute> attributes_;
-		std::vector<element_base> body_;
+		std::vector<element> body_;
 		std::string body_str_;
 		bool is_closing_tag_ = false;
 	};
 
 	template<typename AttributeData_>
-	class element : public element_base
+	class element_creator : public element
 	{
 	protected:
 		using attribute_data = AttributeData_;
 
 	public:
-		element(const element& element)
-			: element_base(element)
-		{}
-		element(element&& element) noexcept
-			: element_base(std::move(element))
-		{}
-		virtual ~element() override = default;
+		element_creator(const element_creator&) = delete;
+		virtual ~element_creator() override = default;
 
 	protected:
-		using element_base::element_base;
+		explicit element_creator(const std::string& name)
+			: element(name)
+		{}
+		element_creator(const std::string& name, const std::string& str)
+			: element(name, str)
+		{}
 
 	public:
 		element& operator=(const element&) = delete;
+		template<typename FirstAttribute_, typename... OtherAttributes_>
+		element operator()(FirstAttribute_&& first_attribute, OtherAttributes_&& ... other_attributes) const
+		{
+			static_assert(attribute_data_checker<attribute_data, FirstAttribute_, OtherAttributes_...>::is_usable);
+
+			element result(*this);
+			result.add_attribute(std::forward<FirstAttribute_>(first_attribute));
+			return result(std::forward<OtherAttributes_>(other_attributes)...);
+		}
+		template<typename Attribute_>
+		element operator()(Attribute_&& attribute) const
+		{
+			static_assert(attribute_data_checker<attribute_data, Attribute_>::is_usable);
+
+			element result(*this);
+			result.add_attribute(std::forward<Attribute_>(attribute));
+			return result;
+		}
+		const element& operator()() const
+		{
+			return *this;
+		}
 	};
 
-	class dummy_element : public element<attribute_data<>>
+	class dummy_element : public element_creator<attribute_data<>>
 	{
 	public:
 		dummy_element()
-			: element("")
+			: element_creator("")
 		{}
 		dummy_element(const dummy_element&) = delete;
 		virtual ~dummy_element() override = default;
@@ -134,11 +133,11 @@ namespace cppreact::details
 		dummy_element& operator=(const dummy_element&) = delete;
 	};
 
-	class string_element : public element<attribute_data<>>
+	class string_element : public element_creator<attribute_data<>>
 	{
 	public:
-		string_element(const std::string& str)
-			: element("", str)
+		string_element(const std::string& body_str)
+			: element_creator("", body_str)
 		{}
 		string_element(const string_element&) = delete;
 		virtual ~string_element() override = default;
@@ -147,11 +146,15 @@ namespace cppreact::details
 		string_element& operator=(const string_element&) = delete;
 	};
 
-	const element_base& operator<(const dummy_element&, const element_base& element)
+	const element& operator<(const dummy_element&, const element& element)
 	{
 		return element;
 	}
-	element_base operator<(const element_base& element_a, const element_base& element_b)
+	const element& operator<(const element& element, const dummy_element&)
+	{
+		return element;
+	}
+	element operator<(const element& element_a, const element& element_b)
 	{
 		if (element_b.is_closing_tag())
 		{
@@ -159,20 +162,20 @@ namespace cppreact::details
 		}
 		else
 		{
-			element_base result(element_a);
+			element result(element_a);
 			result.add_body(element_b);
 			return result;
 		}
 	}
-	const element_base& operator>(const dummy_element&, const element_base& element)
+	const element& operator>(const dummy_element&, const element& element)
 	{
 		return element;
 	}
-	const element_base& operator>(const element_base& element, const dummy_element&)
+	const element& operator>(const element& element, const dummy_element&)
 	{
 		return element;
 	}
-	element_base operator>(const element_base& element_a, const element_base& element_b)
+	element operator>(const element& element_a, const element& element_b)
 	{
 		if (element_b.is_closing_tag())
 		{
@@ -180,15 +183,15 @@ namespace cppreact::details
 		}
 		else
 		{
-			element_base result(element_a);
+			element result(element_a);
 			result.add_body(element_b);
 			return result;
 		}
 	}
 
-	std::ostream& operator<<(std::ostream& stream, const element_base& element)
+	std::ostream& operator<<(std::ostream& stream, const element& element)
 	{
-		if (!element.body_str().size())
+		if (!element.name().empty())
 		{
 			stream << '<' << element.name();
 
@@ -223,7 +226,7 @@ namespace cppreact
 	static const details::dummy_element $;
 	static const details::dummy_element _;
 
-	details::element_base operator""_s(const char* string, std::size_t len)
+	details::element operator""_s(const char* string, std::size_t len)
 	{
 		return details::string_element(std::string(string, len));
 	}
@@ -231,13 +234,13 @@ namespace cppreact
 
 namespace cppreact::details
 {
-	class a_element : public element<attribute_data<
+	class a_element : public element_creator<attribute_data<
 		href_attribute
 	>>
 	{
 	public:
 		a_element()
-			: element("a")
+			: element_creator("a")
 		{}
 		a_element(const a_element&) = delete;
 		virtual ~a_element() override = default;

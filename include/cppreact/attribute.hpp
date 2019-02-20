@@ -29,7 +29,7 @@ namespace cppreact::details
 	class attribute_data_checker<AttributeData_, FirstAttribute_, OtherAttributes_...>
 	{
 	public:
-		static constexpr bool is_usable = AttributeData_::template is_usable<FirstAttribute_> && attribute_data_checker<AttributeData_, OtherAttributes_...>::is_usable;
+		static constexpr bool is_usable = AttributeData_::template is_usable<std::remove_reference_t<FirstAttribute_>> && attribute_data_checker<AttributeData_, OtherAttributes_...>::is_usable;
 	};
 	template<typename AttributeData_>
 	class attribute_data_checker<AttributeData_>
@@ -41,6 +41,12 @@ namespace cppreact::details
 	class attribute
 	{
 	public:
+		explicit attribute(const std::string& name)
+			: name_(name)
+		{}
+		attribute(const std::string& name, const std::string& value)
+			: name_(name), value_(value)
+		{}
 		attribute(const attribute& attribute)
 			: name_(attribute.name_), value_(attribute.value_)
 		{}
@@ -48,22 +54,8 @@ namespace cppreact::details
 			: name_(std::move(attribute.name_)), value_(std::move(attribute.value_))
 		{}
 		virtual ~attribute() = default;
-
-	protected:
-		explicit attribute(const std::string& name)
-			: name_(name)
-		{}
-		attribute(const std::string& name, const std::string& value)
-			: name_(name), value_(value)
-		{}
-
+		
 	public:
-		attribute operator=(const std::string& value) const
-		{
-			attribute result(*this);
-			result.value(value);
-			return result;
-		}
 		attribute& operator=(const attribute&) = delete;
 
 	public:
@@ -75,8 +67,6 @@ namespace cppreact::details
 		{
 			return value_;
 		}
-
-	protected:
 		void value(const std::string& new_value)
 		{
 			value_ = new_value;
@@ -90,24 +80,55 @@ namespace cppreact::details
 		std::string name_;
 		std::string value_;
 	};
+
+	template<typename Attribute_>
+	class attribute_creator : public attribute
+	{
+	public:
+		explicit attribute_creator(const std::string& name)
+			: attribute(name)
+		{}
+		attribute_creator(const std::string& name, const std::string& value)
+			: attribute(name, value)
+		{}
+		attribute_creator(const attribute_creator& attribute) = default;
+		attribute_creator(attribute_creator&& attribute) noexcept = default;
+		virtual ~attribute_creator() override = default;
+
+	public:
+		Attribute_ operator=(const std::string& value) const
+		{
+			Attribute_ result(static_cast<const Attribute_&>(*this));
+			result.value(value);
+			return result;
+		}
+		Attribute_ operator=(std::string&& value) const
+		{
+			Attribute_ result(static_cast<const Attribute_&>(*this));
+			result.value(std::move(value));
+			return result;
+		}
+		attribute& operator=(const attribute_creator&) = delete;
+	};
 }
 
 namespace cppreact::details
 {
-	class href_attribute : public attribute
+	class href_attribute : public attribute_creator<href_attribute>
 	{
 	public:
 		href_attribute()
-			: attribute("href")
+			: attribute_creator("href")
 		{}
 		explicit href_attribute(const std::string& value)
-			: attribute("href", value)
+			: attribute_creator("href", value)
 		{}
-		href_attribute(const href_attribute&) = delete;
+		href_attribute(const href_attribute& attribute) = default;
+		href_attribute(href_attribute&& attribute) noexcept = default;
 		virtual ~href_attribute() override = default;
 
 	public:
-		using attribute::operator=;
+		using attribute_creator<href_attribute>::operator=;
 		href_attribute& operator=(const href_attribute&) = delete;
 	};
 }
