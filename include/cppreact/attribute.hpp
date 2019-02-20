@@ -6,11 +6,15 @@
 
 namespace cppreact::details
 {
+	class attribute;
+
 	template<typename... Attributes_>
 	class attribute_data;
 	template<typename FirstAttribute_, typename... OtherAttributes_>
 	class attribute_data<FirstAttribute_, OtherAttributes_...>
 	{
+		static_assert(std::is_base_of_v<attribute, FirstAttribute_>);
+
 	public:
 		template<typename Attribute_>
 		static constexpr bool is_usable = std::is_same_v<FirstAttribute_, Attribute_> || attribute_data<OtherAttributes_...>::template is_usable<Attribute_>;

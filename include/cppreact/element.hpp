@@ -2,6 +2,7 @@
 
 #include <cppreact/attribute.hpp>
 
+#include <memory>
 #include <ostream>
 #include <utility>
 #include <vector>
@@ -18,10 +19,12 @@ namespace cppreact::details
 			: name_(name), body_str_(str)
 		{}
 		element(const element& element)
-			: name_(element.name_), attributes_(element.attributes_), body_(element.body_), body_str_(element.body_str_), is_closing_tag_(element.is_closing_tag_)
+			: name_(element.name_), attributes_(element.attributes_), body_(element.body_), body_str_(element.body_str_),
+			is_closing_tag_(element.is_closing_tag_), parent_(element.parent_)
 		{}
 		element(element&& element) noexcept
-			: name_(std::move(element.name_)), attributes_(std::move(element.attributes_)), body_(std::move(element.body_)), body_str_(std::move(element.body_str_)), is_closing_tag_(element.is_closing_tag_)
+			: name_(std::move(element.name_)), attributes_(std::move(element.attributes_)), body_(std::move(element.body_)), body_str_(std::move(element.body_str_)),
+			is_closing_tag_(element.is_closing_tag_), parent_(element.parent_)
 		{}
 		virtual ~element() = default;
 		
@@ -35,15 +38,22 @@ namespace cppreact::details
 		}
 
 	public:
-		template<typename Element_>
-		void add_body(Element_&& element)
+		void add_body(const std::shared_ptr<element>& element)
 		{
-			body_.push_back(std::forward<Element_>(element));
+			body_.push_back(element);
 		}
 		template<typename Attribute_>
 		void add_attribute(Attribute_&& attribute)
 		{
 			attributes_.push_back(std::forward<Attribute_>(attribute));
+		}
+		std::shared_ptr<const element> get_last_body() const
+		{
+			return body_.back();
+		}
+		std::shared_ptr<element> get_last_body()
+		{
+			return body_.back();
 		}
 
 	public:
@@ -55,7 +65,7 @@ namespace cppreact::details
 		{
 			return attributes_;
 		}
-		const std::vector<element>& body() const noexcept
+		const std::vector<std::shared_ptr<element>>& body() const noexcept
 		{
 			return body_;
 		}
@@ -67,13 +77,23 @@ namespace cppreact::details
 		{
 			return is_closing_tag_;
 		}
+		std::weak_ptr<element> parent() const noexcept
+		{
+			return parent_;
+		}
+		void parent(const std::weak_ptr<element>& new_parent) noexcept
+		{
+			parent_ = new_parent;
+		}
 		
 	private:
 		std::string name_;
 		std::vector<attribute> attributes_;
-		std::vector<element> body_;
+		std::vector<std::shared_ptr<element>> body_;
 		std::string body_str_;
 		bool is_closing_tag_ = false;
+
+		std::weak_ptr<element> parent_;
 	};
 
 	template<typename AttributeData_>
@@ -97,26 +117,26 @@ namespace cppreact::details
 	public:
 		element& operator=(const element&) = delete;
 		template<typename FirstAttribute_, typename... OtherAttributes_>
-		element operator()(FirstAttribute_&& first_attribute, OtherAttributes_&& ... other_attributes) const
+		std::shared_ptr<element> operator()(FirstAttribute_&& first_attribute, OtherAttributes_&& ... other_attributes) const
 		{
 			static_assert(attribute_data_checker<attribute_data, FirstAttribute_, OtherAttributes_...>::is_usable);
 
-			element result(*this);
-			result.add_attribute(std::forward<FirstAttribute_>(first_attribute));
-			return result(std::forward<OtherAttributes_>(other_attributes)...);
+			std::shared_ptr<element> result(std::make_shared<element>(*this));
+			result->add_attribute(std::forward<FirstAttribute_>(first_attribute));
+			return (*result)(std::forward<OtherAttributes_>(other_attributes)...);
 		}
 		template<typename Attribute_>
-		element operator()(Attribute_&& attribute) const
+		std::shared_ptr<element> operator()(Attribute_&& attribute) const
 		{
 			static_assert(attribute_data_checker<attribute_data, Attribute_>::is_usable);
 
-			element result(*this);
-			result.add_attribute(std::forward<Attribute_>(attribute));
+			std::shared_ptr<element> result(std::make_shared<element>(*this));
+			result->add_attribute(std::forward<Attribute_>(attribute));
 			return result;
 		}
-		const element& operator()() const
+		std::shared_ptr<element>& operator()() const
 		{
-			return *this;
+			return std::make_shared(*this);
 		}
 	};
 
@@ -146,36 +166,66 @@ namespace cppreact::details
 		string_element& operator=(const string_element&) = delete;
 	};
 
-	const element& operator<(const dummy_element&, const element& element)
+	const std::shared_ptr<element>& operator<(const dummy_element&, const std::shared_ptr<element>& element)
 	{
 		return element;
 	}
-	const element& operator<(const element& element, const dummy_element&)
+	std::shared_ptr<element> operator<(const dummy_element&, const element& element)
+	{
+		return std::make_shared<details::element>(element);
+	}
+	const std::shared_ptr<element>& operator<(const std::shared_ptr<element>& element, const dummy_element&)
 	{
 		return element;
 	}
-	element operator<(const element& element_a, const element& element_b)
+	std::shared_ptr<element> operator<(const element& element, const dummy_element&)
 	{
-		if (element_b.is_closing_tag())
+		return std::make_shared<details::element>(element);
+	}
+	std::shared_ptr<element> operator<(const std::shared_ptr<element>& element_a, const std::shared_ptr<element>& element_b)
+	{
+		if (element_b->is_closing_tag())
 		{
-			return element_a;
+			return element_a->parent().lock();
 		}
 		else
 		{
-			element result(element_a);
-			result.add_body(element_b);
+			element_b->parent(element_a);
+			return element_b;
+		}
+	}
+	std::shared_ptr<element> operator<(const std::shared_ptr<element>& element_a, const element& element_b)
+	{
+		if (element_b.is_closing_tag())
+		{
+			return element_a->parent().lock();
+		}
+		else
+		{
+			std::shared_ptr<element> result(std::make_shared<element>(element_b));
+			result->parent(element_a);
+			element_a->add_body(result);
 			return result;
 		}
 	}
-	const element& operator>(const dummy_element&, const element& element)
+	const std::shared_ptr<element>& operator>(const std::shared_ptr<element>& element, const dummy_element&)
 	{
 		return element;
 	}
-	const element& operator>(const element& element, const dummy_element&)
+	std::shared_ptr<element> operator>(const std::shared_ptr<element>& element_a, const std::shared_ptr<element>& element_b)
 	{
-		return element;
+		if (element_b->is_closing_tag())
+		{
+			return element_a;
+		}
+		else
+		{
+			element_b->parent(element_a);
+			element_a->add_body(element_b);
+			return element_b;
+		}
 	}
-	element operator>(const element& element_a, const element& element_b)
+	std::shared_ptr<element> operator>(const std::shared_ptr<element>& element_a, const element& element_b)
 	{
 		if (element_b.is_closing_tag())
 		{
@@ -183,8 +233,9 @@ namespace cppreact::details
 		}
 		else
 		{
-			element result(element_a);
-			result.add_body(element_b);
+			std::shared_ptr<element> result(std::make_shared<element>(element_b));
+			result->parent(element_a);
+			element_a->add_body(result);
 			return result;
 		}
 	}
@@ -207,7 +258,7 @@ namespace cppreact::details
 
 			for (const auto& body : element.body())
 			{
-				stream << body;
+				stream << *body;
 			}
 
 			stream << "</" << element.name() << '>';
