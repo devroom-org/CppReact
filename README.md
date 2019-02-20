@@ -1,6 +1,23 @@
 # CppReact
 React for C++17 (Idea by [RanolP](https://github.com/RanolP))
 
+## 예제
+```cpp
+#include <cppreact/cppreact.hpp>
+#include <iostream>
+using namespace cppreact;
+
+int main()
+{
+    auto html = cppreact(
+        <a(href="https://github.com/devroom-org/CppReact")>"CppReact"_s<!a>
+    ); 
+    std::cout << html << '\n';
+
+    return 0;
+}
+```
+
 ## 라이선스
 ```
 MIT License
