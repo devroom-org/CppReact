@@ -2,15 +2,51 @@
 
 #include <cppreact/attribute.hpp>
 
+#include <algorithm>
 #include <memory>
+#include <mutex>
 #include <ostream>
 #include <utility>
 #include <vector>
 
 namespace cppreact::details
 {
+	class element;
+
+	class root_element_manager
+	{
+	public:
+		root_element_manager() = delete;
+		root_element_manager(const root_element_manager&) = delete;
+		~root_element_manager() = delete;
+
+	public:
+		root_element_manager& operator=(const root_element_manager&) = delete;
+
+	private:
+		static inline std::vector<std::shared_ptr<element>> root_elements_;
+		static inline std::mutex mutex_;
+
+	public:
+		static void push_back(const std::shared_ptr<element>& element)
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			root_elements_.push_back(element);
+		}
+		static void erase(const std::shared_ptr<element>& element)
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			root_elements_.erase(std::find(root_elements_.begin(), root_elements_.end(), element));
+		}
+	};
+}
+
+namespace cppreact::details
+{
 	class element
 	{
+		friend class element_wrapper;
+
 	public:
 		explicit element(const std::string& name)
 			: name_(name)
@@ -47,14 +83,6 @@ namespace cppreact::details
 		{
 			attributes_.push_back(std::forward<Attribute_>(attribute));
 		}
-		std::shared_ptr<const element> get_last_body() const
-		{
-			return body_.back();
-		}
-		std::shared_ptr<element> get_last_body()
-		{
-			return body_.back();
-		}
 
 	public:
 		std::string name() const
@@ -85,15 +113,15 @@ namespace cppreact::details
 		{
 			parent_ = new_parent;
 		}
-		
+
 	private:
 		std::string name_;
 		std::vector<attribute> attributes_;
 		std::vector<std::shared_ptr<element>> body_;
 		std::string body_str_;
 		bool is_closing_tag_ = false;
-
 		std::weak_ptr<element> parent_;
+		std::vector<std::weak_ptr<element>> root_body_;
 	};
 
 	template<typename AttributeData_>
@@ -144,7 +172,7 @@ namespace cppreact::details
 	{
 	public:
 		dummy_element()
-			: element_creator("")
+			: element_creator("__CPPREACT_DUMMY__")
 		{}
 		dummy_element(const dummy_element&) = delete;
 		virtual ~dummy_element() override = default;
@@ -157,7 +185,7 @@ namespace cppreact::details
 	{
 	public:
 		string_element(const std::string& body_str)
-			: element_creator("", body_str)
+			: element_creator("__CPPREACT_STRING__", body_str)
 		{}
 		string_element(const string_element&) = delete;
 		virtual ~string_element() override = default;
@@ -166,13 +194,23 @@ namespace cppreact::details
 		string_element& operator=(const string_element&) = delete;
 	};
 
-	const std::shared_ptr<element>& operator<(const dummy_element&, const std::shared_ptr<element>& element)
+	std::shared_ptr<element> operator<(const dummy_element&, const std::shared_ptr<element>& element)
 	{
+		std::shared_ptr result = std::make_shared<details::element>("__CPPREACT_ROOT__");
+		result->add_body(element);
+		element->parent(result);
+
+		root_element_manager::push_back(result);
 		return element;
 	}
 	std::shared_ptr<element> operator<(const dummy_element&, const element& element)
 	{
-		return std::make_shared<details::element>(element);
+		std::shared_ptr result = std::make_shared<details::element>("__CPPREACT_ROOT__");
+		result->add_body(std::make_shared<details::element>(element));
+		result->body().back()->parent(result);
+
+		root_element_manager::push_back(result);
+		return result->body().back();
 	}
 	const std::shared_ptr<element>& operator<(const std::shared_ptr<element>& element, const dummy_element&)
 	{
@@ -202,9 +240,10 @@ namespace cppreact::details
 		}
 		else
 		{
-			std::shared_ptr<element> result(std::make_shared<element>(element_b));
+			std::shared_ptr result = std::make_shared<element>(element_b);
 			result->parent(element_a);
 			element_a->add_body(result);
+
 			return result;
 		}
 	}
@@ -227,45 +266,48 @@ namespace cppreact::details
 	}
 	std::shared_ptr<element> operator>(const std::shared_ptr<element>& element_a, const element& element_b)
 	{
-		if (element_b.is_closing_tag())
-		{
-			return element_a;
-		}
-		else
-		{
-			std::shared_ptr<element> result(std::make_shared<element>(element_b));
-			result->parent(element_a);
-			element_a->add_body(result);
-			return result;
-		}
+		std::shared_ptr result = std::make_shared<element>(element_b);
+		result->parent(element_a);
+		element_a->add_body(result);
+
+		return element_a;
 	}
 
 	std::ostream& operator<<(std::ostream& stream, const element& element)
 	{
-		if (!element.name().empty())
+		const bool is_root = element.name() == "__CPPREACT_ROOT__";
+		const bool is_string = element.name() == "__CPPREACT_STRING__";
+
+		if (is_string)
 		{
-			stream << '<' << element.name();
-
-			if (element.attributes().size())
+			stream << element.body_str();
+		}
+		else
+		{
+			if (!is_root)
 			{
-				for (const auto& attr : element.attributes())
-				{
-					stream << ' ' << attr.name() << "=\"" << attr.value() << '"';
-				}
-			}
+				stream << '<' << element.name();
 
-			stream << '>';
+				if (element.attributes().size())
+				{
+					for (const auto& attr : element.attributes())
+					{
+						stream << ' ' << attr.name() << "=\"" << attr.value() << '"';
+					}
+				}
+
+				stream << '>';
+			}
 
 			for (const auto& body : element.body())
 			{
 				stream << *body;
 			}
 
-			stream << "</" << element.name() << '>';
-		}
-		else
-		{
-			stream << element.body_str();
+			if (!is_root)
+			{
+				stream << "</" << element.name() << '>';
+			}			
 		}
 
 		return stream;
